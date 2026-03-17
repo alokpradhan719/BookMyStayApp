@@ -1,146 +1,74 @@
-import java.util.*;
+import java.io.*;
+import java.util.HashMap;
+import java.util.Map;
 
-// Booking Request
-class BookingRequest {
-    String guestName;
-    String roomType;
-
-    public BookingRequest(String guestName, String roomType) {
-        this.guestName = guestName;
-        this.roomType = roomType;
-    }
-}
-
-// Inventory Service (Thread-Safe)
-class InventoryService {
-    private Map<String, Integer> inventory = new HashMap<>();
-    private Map<String, Queue<String>> availableRooms = new HashMap<>();
-
-    public InventoryService() {
-        addRooms("Single", Arrays.asList("Single-1", "Single-2", "Single-3", "Single-4", "Single-5"));
-        addRooms("Double", Arrays.asList("Double-1", "Double-2", "Double-3"));
-        addRooms("Suite", Arrays.asList("Suite-1", "Suite-2"));
-    }
-
-    private void addRooms(String type, List<String> rooms) {
-        inventory.put(type, rooms.size());
-        availableRooms.put(type, new LinkedList<>(rooms));
-    }
-
-    // 🔒 Critical Section (Thread-Safe)
-    public synchronized String allocateRoom(String roomType) {
-        if (inventory.getOrDefault(roomType, 0) == 0) {
-            return null;
-        }
-
-        String roomId = availableRooms.get(roomType).poll();
-        inventory.put(roomType, inventory.get(roomType) - 1);
-
-        return roomId;
-    }
-
-    public void printInventory() {
-        System.out.println("\nRemaining Inventory:");
-        for (String type : inventory.keySet()) {
-            System.out.println(type + ": " + inventory.get(type));
-        }
-    }
-}
-
-// Booking Service (Shared Queue)
-class BookingService {
-    private Queue<BookingRequest> queue = new LinkedList<>();
-    private InventoryService inventory;
-
-    public BookingService(InventoryService inventory) {
-        this.inventory = inventory;
-    }
-
-    // 🔒 Thread-safe enqueue
-    public synchronized void addRequest(BookingRequest request) {
-        queue.offer(request);
-    }
-
-    // 🔒 Thread-safe dequeue
-    public synchronized BookingRequest getRequest() {
-        return queue.poll();
-    }
-
-    public boolean hasRequests() {
-        return !queue.isEmpty();
-    }
-
-    public InventoryService getInventory() {
-        return inventory;
-    }
-}
-
-// Worker Thread
-class BookingProcessor extends Thread {
-    private BookingService service;
-
-    public BookingProcessor(BookingService service) {
-        this.service = service;
-    }
-
-    @Override
-    public void run() {
-        while (true) {
-            BookingRequest request;
-
-            // 🔒 Get request safely
-            synchronized (service) {
-                if (!service.hasRequests()) break;
-                request = service.getRequest();
-            }
-
-            if (request == null) continue;
-
-            // 🔒 Allocate room safely
-            String roomId = service.getInventory().allocateRoom(request.roomType);
-
-            if (roomId != null) {
-                System.out.println("Booking confirmed for Guest : "
-                        + request.guestName + ", Room ID :  " + roomId);
-            } else {
-                System.out.println("Booking failed for Guest : "
-                        + request.guestName + " (No rooms available)");
-            }
-        }
-    }
-}
-
-// Main Class
 public class BookMyStay {
-    public static void main(String[] args) throws InterruptedException {
 
-        System.out.println("Concurrent Booking Simulation");
+    // Serializable Inventory Class
+    static class Inventory implements Serializable {
+        private static final long serialVersionUID = 1L;
 
-        InventoryService inventory = new InventoryService();
-        BookingService service = new BookingService(inventory);
+        private Map<String, Integer> rooms = new HashMap<>();
 
-        // Add requests
-        service.addRequest(new BookingRequest("Abhi", "Single"));
-        service.addRequest(new BookingRequest("Subha", "Single"));
-        service.addRequest(new BookingRequest("Vanmathi", "Double"));
-        service.addRequest(new BookingRequest("Kural", "Suite"));
+        public Inventory() {
+            rooms.put("Single", 5);
+            rooms.put("Double", 3);
+            rooms.put("Suite", 2);
+        }
 
-        // Create multiple threads
-        Thread t1 = new BookingProcessor(service);
-        Thread t2 = new BookingProcessor(service);
-        Thread t3 = new BookingProcessor(service);
+        public void display() {
+            System.out.println("\nCurrent Inventory:");
+            for (Map.Entry<String, Integer> entry : rooms.entrySet()) {
+                System.out.println(entry.getKey() + " : " + entry.getValue());
+            }
+        }
+    }
 
-        // Start threads
-        t1.start();
-        t2.start();
-        t3.start();
+    // Persistence Service
+    static class PersistenceService {
+        private static final String FILE_NAME = "inventory.dat";
 
-        // Wait for completion
-        t1.join();
-        t2.join();
-        t3.join();
+        public static void save(Inventory inventory) {
+            try (ObjectOutputStream oos =
+                         new ObjectOutputStream(new FileOutputStream(FILE_NAME))) {
 
-        // Print remaining inventory
-        inventory.printInventory();
+                oos.writeObject(inventory);
+                System.out.println("\nInventory saved successfully.");
+
+            } catch (IOException e) {
+                System.out.println("Error saving inventory.");
+            }
+        }
+
+        public static Inventory load() {
+            File file = new File(FILE_NAME);
+
+            if (!file.exists()) {
+                System.out.println("No valid inventory data found. Starting fresh.");
+                return new Inventory();
+            }
+
+            try (ObjectInputStream ois =
+                         new ObjectInputStream(new FileInputStream(FILE_NAME))) {
+
+                return (Inventory) ois.readObject();
+
+            } catch (IOException | ClassNotFoundException e) {
+                System.out.println("No valid inventory data found. Starting fresh.");
+                return new Inventory();
+            }
+        }
+    }
+
+    // Main Method
+    public static void main(String[] args) {
+
+        System.out.println("System Recovery");
+
+        Inventory inventory = PersistenceService.load();
+
+        inventory.display();
+
+        PersistenceService.save(inventory);
     }
 }
